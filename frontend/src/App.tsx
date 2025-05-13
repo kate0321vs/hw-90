@@ -1,10 +1,51 @@
 import React, { useRef, useEffect, useState } from 'react';
-import type {Positions} from "../types";
+import type { IncomingPositions, Positions } from "../types";
 
-const Canvas = () => {
+const App = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [prevPos, setPrevPos] = useState<Positions[]>([]);
+
+    const ws = useRef<WebSocket | null>(null);
+
+    const drawing = (context: CanvasRenderingContext2D | null, newPoint: Positions) => {
+        setPrevPos(prev => {
+            const newPoints = [...prev, newPoint];
+            if (context && newPoints.length > 1) {
+                const prevPoint = newPoints[newPoints.length - 2];
+                context.beginPath();
+                context.moveTo(prevPoint.x, prevPoint.y);
+                context.lineTo(newPoint.x, newPoint.y);
+                context.stroke();
+            }
+            return newPoints;
+        });
+    }
+
+    useEffect(() => {
+        ws.current = new WebSocket(`ws://localhost:8000/canvas`);
+
+        ws.current.onclose = () => console.log('ws closed');
+
+        ws.current.onmessage = event => {
+            const decodedMessage = JSON.parse(event.data) as IncomingPositions;
+
+            if (decodedMessage.type === 'DRAW') {
+                const newPoint = decodedMessage.payload;
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+
+                const context = canvas.getContext('2d');
+                drawing(context, newPoint);
+            }
+        };
+
+        return () => {
+            if (ws.current) {
+                ws.current.close();
+            }
+        };
+    }, []);
 
     const startDrawing = (e: React.MouseEvent) => {
         setIsDrawing(true);
@@ -18,25 +59,16 @@ const Canvas = () => {
         const { offsetX, offsetY } = e.nativeEvent;
         const newPoint = { x: offsetX, y: offsetY };
 
-        setPrevPos(prev => {
-            const newPoints = [...prev, newPoint];
+        if (!ws.current) return;
 
-            const ctx = canvasRef.current!.getContext('2d');
-            if (ctx && newPoints.length > 1) {
-                const prevPoint = newPoints[newPoints.length - 2];
-                ctx.beginPath();
-                ctx.moveTo(prevPoint.x, prevPoint.y);
-                ctx.lineTo(newPoint.x, newPoint.y);
-                ctx.stroke();
-            }
+        ws.current.send(JSON.stringify({
+            type: "DRAW",
+            payload: newPoint,
+        }));
+        const context = canvasRef.current!.getContext('2d');
 
-            return newPoints;
-        });
+        drawing(context, newPoint);
     };
-
-
-
-    console.log(prevPos)
 
     const stopDrawing = () => {
         setIsDrawing(false);
@@ -69,5 +101,5 @@ const Canvas = () => {
     );
 };
 
-export default Canvas;
+export default App;
 
